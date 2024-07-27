@@ -310,7 +310,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { runNpmScript, testPostgresUrl } = nativeBinding
+const { runNpmScript, testPostgresUrl, testRedisParameters } = nativeBinding
 
 module.exports.runNpmScript = runNpmScript
 module.exports.testPostgresUrl = testPostgresUrl
+module.exports.testRedisParameters = testRedisParameters

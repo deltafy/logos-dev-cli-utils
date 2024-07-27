@@ -111,3 +111,48 @@ pub async fn test_postgres_url(url: String) -> napi::Result<PgResponse> {
         }
     }
 }
+
+#[napi]
+pub async fn test_redis_parameters(
+    host: String, 
+    username: Option<String>,
+    password: Option<String>
+) -> napi::Result<String> {
+    let url = match (username, password) {
+        (Some(user), Some(pass)) => format!("redis://{}:{}@{}/", user, pass, host),
+        (None, Some(pass)) => format!("redis://:{}@{}/", pass, host),
+        _ => format!("redis://{}/", host),
+    };
+
+    let client = match redis::Client::open(url) {
+        Ok(client) => client,
+        Err(error) => {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                error.to_string()
+            ))
+        }
+    };
+
+    let mut connection = match client.get_multiplexed_tokio_connection().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                error.to_string()
+            ))
+        }
+    };
+
+    let ping: Result<String, _> = redis::cmd("PING").query_async(&mut connection).await;
+
+    match ping {
+        Ok(pong) => Ok(pong),
+        Err(error) => {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                error.to_string()
+            ))
+        }
+    }
+}
