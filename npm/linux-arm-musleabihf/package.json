@@ -11,6 +11,7 @@
   "files": [
     "logos-dev-cli-utils.linux-arm-musleabihf.node"
   ],
+  "repository": "https://github.com/deltafy/logos-dev-cli-utils",
   "license": "MIT",
   "engines": {
     "node": ">= 10"

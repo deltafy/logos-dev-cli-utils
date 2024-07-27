@@ -3,10 +3,11 @@
   "version": "0.0.0",
   "main": "index.js",
   "types": "index.d.ts",
-  "repository": {
-    "type": "git",
-    "url": "git@github.com:deltafy/logos-dev-cli-utils.git"
-  },
+  "repository": "https://github.com/deltafy/logos-dev-cli-utils",
+  "files": [
+    "index.d.ts",
+    "index.js"
+  ],
   "napi": {
     "name": "logos-dev-cli-utils",
     "triples": {

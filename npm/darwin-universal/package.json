@@ -8,6 +8,7 @@
   "files": [
     "logos-dev-cli-utils.darwin-universal.node"
   ],
+  "repository": "https://github.com/deltafy/logos-dev-cli-utils",
   "license": "MIT",
   "engines": {
     "node": ">= 10"
