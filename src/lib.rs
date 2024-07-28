@@ -23,14 +23,6 @@ pub struct PgResponse {
     pub message: String,
 }
 
-fn get_postgres_error_code(error: &PgError) -> String {
-    if let Some(db_error) = error.as_db_error() {
-        db_error.code().code().to_string()
-    } else {
-        "unknown".to_string()
-    }
-}
-
 fn get_postgres_error_message(error: &PgError) -> String {
     if let Some(db_error) = error.as_db_error() {
         db_error.message().to_string()
@@ -39,17 +31,27 @@ fn get_postgres_error_message(error: &PgError) -> String {
     }
 }
 
-fn create_postgres_error_response(error: &PgError) -> PgResponse {
-    PgResponse {
-        code: get_postgres_error_code(error),
-        message: get_postgres_error_message(error)
-    }
-}
+fn create_postgres_error_response(error: &PgError) -> napi::Result<PgResponse> {
+    let (error_code, error_details) = if let Some(db_error) = error.as_db_error() {
+        (
+            db_error.code().code().to_string(),
+            db_error.message().to_string()
+        )
+    } else {
+        (
+            "unknown".to_string(),
+            error.to_string()
+        )
+    };
 
-fn create_postgres_error_result(error_msg: PgResponse) -> napi::Result<PgResponse> {
+    let error_result = PgResponse {
+        code: error_code,
+        message: error_details
+    };
+
     Err(napi::Error::new(
         napi::Status::GenericFailure,
-        serde_json::to_string(&error_msg).unwrap(),
+        serde_json::to_string(&error_result).unwrap()
     ))
 }
 
@@ -105,9 +107,7 @@ pub async fn test_postgres_url(url: String) -> napi::Result<PgResponse> {
     let (client, connection) = match create_postgres_connection(&url).await {
         Ok((client, connection)) => (client, connection),
         Err(error) => {
-            return create_postgres_error_result(
-                create_postgres_error_response(&error)
-            );
+            return create_postgres_error_response(&error);
         }
     };
 
@@ -118,11 +118,7 @@ pub async fn test_postgres_url(url: String) -> napi::Result<PgResponse> {
             code: "00000".to_string(),
             message: "Success".to_string()
         }),
-        Err(error) => {
-            return create_postgres_error_result(
-                create_postgres_error_response(&error)
-            );
-        }
+        Err(error) => create_postgres_error_response(&error),
     }
 }
 
@@ -131,25 +127,19 @@ pub async fn create_database(url: String, database: String) -> napi::Result<PgRe
     let (client, connection) = match create_postgres_connection(&url).await {
         Ok((client, connection)) => (client, connection),
         Err(error) => {
-            return create_postgres_error_result(
-                create_postgres_error_response(&error)
-            );
+            return create_postgres_error_response(&error);
         }
     };
 
     tokio::spawn(handle_postgres_connection(connection));
 
-    let query = format!("CREATE DATABASE {}", database);
+    let query = format!("CREATE DATABASE \"{}\"", database);
     match client.simple_query(&query).await {
         Ok(_) => Ok(PgResponse {
             code: "00000".to_string(),
             message: format!("Successfully created database '{}'", database)
         }),
-        Err(error) => {
-            return create_postgres_error_result(
-                create_postgres_error_response(&error)
-            );
-        }
+        Err(error) => create_postgres_error_response(&error)
     }
 }
 
