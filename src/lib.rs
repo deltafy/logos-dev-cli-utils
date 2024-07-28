@@ -1,8 +1,10 @@
 use napi_derive::napi;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 use serde::{Serialize, Deserialize};
-use tokio_postgres::{NoTls, Error as PgError};
+use tokio_postgres::{NoTls, Error as PgError, Client as PgClient, Connection as PgConnection};
 
 // map std::process::Output so we could mimic the callback
 // parameters of Node's child_process.exec()
@@ -34,6 +36,34 @@ fn get_postgres_error_message(error: &PgError) -> String {
         db_error.message().to_string()
     } else {
         error.to_string()
+    }
+}
+
+fn create_postgres_error_response(error: &PgError) -> PgResponse {
+    PgResponse {
+        code: get_postgres_error_code(error),
+        message: get_postgres_error_message(error)
+    }
+}
+
+fn create_postgres_error_result(error_msg: PgResponse) -> napi::Result<PgResponse> {
+    Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        serde_json::to_string(&error_msg).unwrap(),
+    ))
+}
+
+async fn create_postgres_connection(
+    url: &str
+) -> Result<(PgClient, PgConnection<tokio_postgres::Socket, tokio_postgres::tls::NoTlsStream>), PgError> {
+    tokio_postgres::connect(url, NoTls).await
+}
+
+async fn handle_postgres_connection(
+    conn: PgConnection<tokio_postgres::Socket, tokio_postgres::tls::NoTlsStream>
+) {
+    if let Err(error) = conn.await {
+        eprintln!("Connection Error: {}", get_postgres_error_message(&error))
     }
 }
 
@@ -72,26 +102,16 @@ pub async fn run_npm_script(script: String) -> napi::Result<ProcessOutput> {
 
 #[napi]
 pub async fn test_postgres_url(url: String) -> napi::Result<PgResponse> {
-    let (client, connection) = match tokio_postgres::connect(&url, NoTls).await {
+    let (client, connection) = match create_postgres_connection(&url).await {
         Ok((client, connection)) => (client, connection),
         Err(error) => {
-            let error_msg = PgResponse {
-                code: get_postgres_error_code(&error),
-                message: get_postgres_error_message(&error)
-            };
-
-            return Err(napi::Error::new(
-                napi::Status::GenericFailure,
-                serde_json::to_string(&error_msg).unwrap(),
-            ));
+            return create_postgres_error_result(
+                create_postgres_error_response(&error)
+            );
         }
     };
 
-    tokio::spawn(async move {
-        if let Err(error) = connection.await {
-            eprintln!("Connection Error: {}", get_postgres_error_message(&error))
-        }
-    });
+    tokio::spawn(handle_postgres_connection(connection));
 
     match client.simple_query("SELECT 1").await {
         Ok(_) => Ok(PgResponse {
@@ -99,15 +119,36 @@ pub async fn test_postgres_url(url: String) -> napi::Result<PgResponse> {
             message: "Success".to_string()
         }),
         Err(error) => {
-            let error_msg = PgResponse {
-                code: get_postgres_error_code(&error),
-                message: get_postgres_error_message(&error)
-            };
+            return create_postgres_error_result(
+                create_postgres_error_response(&error)
+            );
+        }
+    }
+}
 
-            Err(napi::Error::new(
-                napi::Status::GenericFailure,
-                serde_json::to_string(&error_msg).unwrap(),
-            ))
+#[napi]
+pub async fn create_database(url: String, database: String) -> napi::Result<PgResponse> {
+    let (client, connection) = match create_postgres_connection(&url).await {
+        Ok((client, connection)) => (client, connection),
+        Err(error) => {
+            return create_postgres_error_result(
+                create_postgres_error_response(&error)
+            );
+        }
+    };
+
+    tokio::spawn(handle_postgres_connection(connection));
+
+    let query = format!("CREATE DATABASE {}", database);
+    match client.simple_query(&query).await {
+        Ok(_) => Ok(PgResponse {
+            code: "00000".to_string(),
+            message: format!("Successfully created database '{}'", database)
+        }),
+        Err(error) => {
+            return create_postgres_error_result(
+                create_postgres_error_response(&error)
+            );
         }
     }
 }
@@ -156,3 +197,10 @@ pub async fn test_redis_parameters(
         }
     }
 }
+
+#[napi]
+pub fn file_exists(file_path: String) -> bool {
+    let filepath = Path::new(&file_path);
+    fs::metadata(filepath).map(|metadata| metadata.is_file()).unwrap_or(false)
+}
+

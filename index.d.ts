@@ -14,4 +14,6 @@ export interface PgResponse {
 }
 export declare function runNpmScript(script: string): Promise<ProcessOutput>
 export declare function testPostgresUrl(url: string): Promise<PgResponse>
+export declare function createDatabase(url: string, database: string): Promise<PgResponse>
 export declare function testRedisParameters(host: string, username?: string | undefined | null, password?: string | undefined | null): Promise<string>
+export declare function fileExists(filePath: string): boolean
