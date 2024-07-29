@@ -1,7 +1,7 @@
 use napi_derive::napi;
 use std::env;
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
 use serde::{Serialize, Deserialize};
@@ -262,3 +262,71 @@ pub fn copy_file(
 
     Ok(())
 }
+
+#[napi]
+pub fn env_to_json_string(env_path: String) -> napi::Result<String> {
+    let env_file_path = Path::new(&env_path);
+
+    let env_data = fs::read_to_string(env_file_path)
+        .map_err(|error| napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to read .env: {}", error).to_string()
+        ))?;
+
+    let mut json_map = serde_json::Map::new();
+
+    for line in env_data.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            json_map.insert(
+                key.to_string(), 
+                serde_json::Value::String(value.to_string())
+            );
+        }
+    }
+
+    match serde_json::to_string(&json_map) {
+        Ok(json_str) => Ok(json_str),
+        Err(error) => {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to create JSON string: {}", error).to_string()
+            ))
+        }
+    }
+}
+
+#[napi]
+pub fn json_string_to_env(json_str: String, env_path: String) -> napi::Result<()> {
+    let env_file_path = Path::new(&env_path);
+    
+    let data: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|error| napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to parse to JSON: {}", error).to_string()
+        ))?;
+
+    let json_map = data.as_object().ok_or_else(|| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            "Cannot convert JSON string to object".to_string()
+        )
+    })?;
+
+    let mut file = fs::File::create(env_file_path)
+        .map_err(|error| napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to create output file: {}", error).to_string()
+        ))?;
+
+    for (key, value) in json_map {
+        let val = value.as_str().unwrap_or("");
+        writeln!(file, "{}={}", key, val)
+            .map_err(|error| napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("Failed to write to output file: {}", error).to_string()
+            ))?;
+    }
+
+    Ok(())
+}
+

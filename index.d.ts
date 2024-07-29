@@ -20,3 +20,5 @@ export declare function fileExists(filePath: string): boolean
 export declare function renameDatabase(url: string, database: string, newDatabaseName: string): Promise<PgResponse>
 export declare function findNonexistentFiles(paths: Array<string>): Array<string>
 export declare function copyFile(source: string, destination: string, createDestIfNotExists?: boolean | undefined | null): void
+export declare function envToJsonString(envPath: string): string
+export declare function jsonStringToEnv(jsonStr: string, envPath: string): void
