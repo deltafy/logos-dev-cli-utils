@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "deltafy_logos-dev-cli-utils"
-version = "0.1.0"
+version = "0.3.0"
 
 [lib]
 crate-type = ["cdylib"]
