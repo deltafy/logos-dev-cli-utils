@@ -254,7 +254,14 @@ pub fn json_string_to_env(json_str: String, env_path: String) -> napi::Result<()
         ))?;
 
     for (key, value) in json_map {
-        let val = value.as_str().unwrap_or("");
+        let val = match value {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Null => "".to_string(),
+            _ => continue,
+        };
+
         writeln!(file, "{}={}", key, val)
             .map_err(|error| napi::Error::new(
                 napi::Status::GenericFailure,
