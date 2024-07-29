@@ -1,11 +1,15 @@
 use napi_derive::napi;
 use std::env;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
 use serde::{Serialize, Deserialize};
-use tokio_postgres::{NoTls, Error as PgError, Client as PgClient, Connection as PgConnection};
+
+mod postgres;
+mod file;
+
+use postgres::PgResponse;
 
 // map std::process::Output so we could mimic the callback
 // parameters of Node's child_process.exec()
@@ -15,75 +19,6 @@ pub struct ProcessOutput {
     pub status: i32,            // convert from ExitStatus
     pub stdout: String,         // convert from Vec<u8>
     pub stderr: String,         // convert from Vec<u8>
-}
-
-#[napi(object)]
-#[derive(Serialize, Deserialize)]
-pub struct PgResponse {
-    pub code: String,           // convert from SqlState
-    pub message: String,
-}
-
-fn get_postgres_error_message(error: &PgError) -> String {
-    if let Some(db_error) = error.as_db_error() {
-        db_error.message().to_string()
-    } else {
-        error.to_string()
-    }
-}
-
-fn create_postgres_error_response(error: &PgError) -> napi::Result<PgResponse> {
-    let (error_code, error_details) = if let Some(db_error) = error.as_db_error() {
-        (
-            db_error.code().code().to_string(),
-            db_error.message().to_string()
-        )
-    } else {
-        (
-            "unknown".to_string(),
-            error.to_string()
-        )
-    };
-
-    let error_result = PgResponse {
-        code: error_code,
-        message: error_details
-    };
-
-    Err(napi::Error::new(
-        napi::Status::GenericFailure,
-        serde_json::to_string(&error_result).unwrap()
-    ))
-}
-
-async fn create_postgres_connection(
-    url: &str
-) -> Result<(PgClient, PgConnection<tokio_postgres::Socket, tokio_postgres::tls::NoTlsStream>), PgError> {
-    tokio_postgres::connect(url, NoTls).await
-}
-
-async fn handle_postgres_connection(
-    conn: PgConnection<tokio_postgres::Socket, tokio_postgres::tls::NoTlsStream>
-) {
-    if let Err(error) = conn.await {
-        eprintln!("Connection Error: {}", get_postgres_error_message(&error))
-    }
-}
-
-fn read_file(path: &str) -> napi::Result<File> {
-    fs::File::open(path)
-        .map_err(|error| napi::Error::new(
-                napi::Status::GenericFailure, 
-                format!("Failed to open {}: {}", path, error)
-        ))
-}
-
-fn create_file(path: &str) -> napi::Result<File> {
-    fs::File::create(path)
-        .map_err(|error| napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to create {}: {}", path, error)
-        ))
 }
 
 #[napi]
@@ -121,34 +56,34 @@ pub async fn run_npm_script(script: String) -> napi::Result<ProcessOutput> {
 
 #[napi]
 pub async fn test_postgres_url(url: String) -> napi::Result<PgResponse> {
-    let (client, connection) = match create_postgres_connection(&url).await {
+    let (client, connection) = match postgres::create_postgres_connection(&url).await {
         Ok((client, connection)) => (client, connection),
         Err(error) => {
-            return create_postgres_error_response(&error);
+            return postgres::create_postgres_error_response(&error);
         }
     };
 
-    tokio::spawn(handle_postgres_connection(connection));
+    tokio::spawn(postgres::handle_postgres_connection(connection));
 
     match client.simple_query("SELECT 1").await {
         Ok(_) => Ok(PgResponse {
             code: "00000".to_string(),
             message: "Success".to_string()
         }),
-        Err(error) => create_postgres_error_response(&error),
+        Err(error) => postgres::create_postgres_error_response(&error),
     }
 }
 
 #[napi]
 pub async fn create_database(url: String, database: String) -> napi::Result<PgResponse> {
-    let (client, connection) = match create_postgres_connection(&url).await {
+    let (client, connection) = match postgres::create_postgres_connection(&url).await {
         Ok((client, connection)) => (client, connection),
         Err(error) => {
-            return create_postgres_error_response(&error);
+            return postgres::create_postgres_error_response(&error);
         }
     };
 
-    tokio::spawn(handle_postgres_connection(connection));
+    tokio::spawn(postgres::handle_postgres_connection(connection));
 
     let query = format!("CREATE DATABASE \"{}\"", database);
     match client.simple_query(&query).await {
@@ -156,7 +91,7 @@ pub async fn create_database(url: String, database: String) -> napi::Result<PgRe
             code: "00000".to_string(),
             message: format!("Successfully created database '{}'", database)
         }),
-        Err(error) => create_postgres_error_response(&error)
+        Err(error) => postgres::create_postgres_error_response(&error)
     }
 }
 
@@ -213,14 +148,14 @@ pub fn file_exists(file_path: String) -> bool {
 
 #[napi]
 pub async fn rename_database(url: String, database: String, new_database_name: String) -> napi::Result<PgResponse> {
-    let (client, connection) = match create_postgres_connection(&url).await {
+    let (client, connection) = match postgres::create_postgres_connection(&url).await {
         Ok((client, connection)) => (client, connection),
         Err(error) => {
-            return create_postgres_error_response(&error);
+            return postgres::create_postgres_error_response(&error);
         }
     };
 
-    tokio::spawn(handle_postgres_connection(connection));
+    tokio::spawn(postgres::handle_postgres_connection(connection));
 
     let query = format!("ALTER DATABASE \"{}\" RENAME TO \"{}\";", database, new_database_name);
     match client.batch_execute(&query).await {
@@ -228,7 +163,7 @@ pub async fn rename_database(url: String, database: String, new_database_name: S
             code: "00000".to_string(),
             message: format!("Database {} renamed to {}", database, new_database_name)
         }),
-        Err(error) => create_postgres_error_response(&error)
+        Err(error) => postgres::create_postgres_error_response(&error)
     }
 }
 
@@ -246,12 +181,12 @@ pub fn copy_file(
     destination: String, 
     create_dest_if_not_exists: Option<bool>
 ) -> napi::Result<()> {
-    let mut source_file = read_file(&source)?;
+    let mut source_file = file::read_file(&source)?;
 
     let mut destination_file = if create_dest_if_not_exists.unwrap_or(false) {
-        create_file(&destination)?
+        file::create_file(&destination)?
     } else {
-        read_file(&destination)?
+        file::read_file(&destination)?
     };
 
     io::copy(&mut source_file, &mut destination_file)

@@ -1,6 +1,6 @@
 {
   "name": "@deltafy/logos-dev-cli-utils",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "main": "index.js",
   "types": "index.d.ts",
   "repository": "https://github.com/deltafy/logos-dev-cli-utils",
