@@ -17,3 +17,6 @@ export declare function testPostgresUrl(url: string): Promise<PgResponse>
 export declare function createDatabase(url: string, database: string): Promise<PgResponse>
 export declare function testRedisParameters(host: string, username?: string | undefined | null, password?: string | undefined | null): Promise<string>
 export declare function fileExists(filePath: string): boolean
+export declare function renameDatabase(url: string, database: string, newDatabaseName: string): Promise<PgResponse>
+export declare function findNonexistentFiles(paths: Array<string>): Array<string>
+export declare function copyFile(source: string, destination: string, createDestIfNotExists?: boolean | undefined | null): void

@@ -1,6 +1,7 @@
 use napi_derive::napi;
 use std::env;
-use std::fs;
+use std::fs::{self, File};
+use std::io;
 use std::path::Path;
 use std::process::Command;
 use serde::{Serialize, Deserialize};
@@ -67,6 +68,22 @@ async fn handle_postgres_connection(
     if let Err(error) = conn.await {
         eprintln!("Connection Error: {}", get_postgres_error_message(&error))
     }
+}
+
+fn read_file(path: &str) -> napi::Result<File> {
+    fs::File::open(path)
+        .map_err(|error| napi::Error::new(
+                napi::Status::GenericFailure, 
+                format!("Failed to open {}: {}", path, error)
+        ))
+}
+
+fn create_file(path: &str) -> napi::Result<File> {
+    fs::File::create(path)
+        .map_err(|error| napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to create {}: {}", path, error)
+        ))
 }
 
 #[napi]
@@ -194,3 +211,54 @@ pub fn file_exists(file_path: String) -> bool {
     fs::metadata(filepath).map(|metadata| metadata.is_file()).unwrap_or(false)
 }
 
+#[napi]
+pub async fn rename_database(url: String, database: String, new_database_name: String) -> napi::Result<PgResponse> {
+    let (client, connection) = match create_postgres_connection(&url).await {
+        Ok((client, connection)) => (client, connection),
+        Err(error) => {
+            return create_postgres_error_response(&error);
+        }
+    };
+
+    tokio::spawn(handle_postgres_connection(connection));
+
+    let query = format!("ALTER DATABASE \"{}\" RENAME TO \"{}\";", database, new_database_name);
+    match client.batch_execute(&query).await {
+        Ok(_) => Ok(PgResponse {
+            code: "00000".to_string(),
+            message: format!("Database {} renamed to {}", database, new_database_name)
+        }),
+        Err(error) => create_postgres_error_response(&error)
+    }
+}
+
+#[napi]
+pub fn find_nonexistent_files(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|path| !fs::metadata(path).is_ok())
+        .collect()
+}
+
+#[napi]
+pub fn copy_file(
+    source: String, 
+    destination: String, 
+    create_dest_if_not_exists: Option<bool>
+) -> napi::Result<()> {
+    let mut source_file = read_file(&source)?;
+
+    let mut destination_file = if create_dest_if_not_exists.unwrap_or(false) {
+        create_file(&destination)?
+    } else {
+        read_file(&destination)?
+    };
+
+    io::copy(&mut source_file, &mut destination_file)
+        .map_err(|error| napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to write to {}: {}", &destination, error)
+        ))?;
+
+    Ok(())
+}
